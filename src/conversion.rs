@@ -56,6 +56,7 @@ pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) {
         )
       );
 
+      //TODO this may never trigger if we run out of event input
       if chunk_events.len() == 100 {
 
         let chunk_data = flatten_framedata(&mut fbb, rising_evt_count, falling_evt_count, chunk_events.as_slice());
