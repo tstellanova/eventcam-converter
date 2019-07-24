@@ -97,6 +97,7 @@ impl ChangeEvent {
 pub enum FrameDataOffset {}
 #[derive(Copy, Clone, Debug, PartialEq)]
 
+/// FrameData groups an arbitrary number of change events 
 pub struct FrameData<'a> {
   pub _tab: flatbuffers::Table<'a>,
 }
@@ -138,10 +139,12 @@ impl<'a> FrameData<'a> {
   pub fn events(&self) -> Option<&'a [ChangeEvent]> {
     self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<ChangeEvent>>>(FrameData::VT_EVENTS, None).map(|v| v.safe_slice() )
   }
+  /// the count of rising edge events included in this frame
   #[inline]
   pub fn rising_count(&self) -> u32 {
     self._tab.get::<u32>(FrameData::VT_RISING_COUNT, Some(0)).unwrap()
   }
+  /// the count of falling edge events included in this frame
   #[inline]
   pub fn falling_count(&self) -> u32 {
     self._tab.get::<u32>(FrameData::VT_FALLING_COUNT, Some(0)).unwrap()
