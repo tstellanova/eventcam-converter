@@ -8,7 +8,87 @@ use flatbuffers::{FlatBufferBuilder};
 
 use crate::dvs_event_generated::event_cam;
 
-use arcstar::sae_types::SaeEvent;
+use arcstar::sae_types::{SaeEvent, SaeTime};
+use crate::dvs_event_generated::event_cam::ChangeEvent;
+
+
+///
+/// Take a CSV events file, in the format described by
+/// (Event-Camera Dataset and Simulator)[http://rpg.ifi.uzh.ch/davis_data.html]
+/// and generate an equivalent flatbuffer file.
+/// Briefly, the CSV format is:
+/// One event per line, space delimited (timestamp x y polarity) eg `0.706715000 58 68 1`
+///
+/// Returns the tuple `(record_count, chunk_count)` where chunk count is the number of length-prefixed
+/// chunk buffers in the file
+pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) -> (u32, u32) {
+
+  //open the out fb file for writing
+  let outfile = File::create(flatbuf_path).expect("Couldn't open flatbuf output file for write.");
+  let mut outfile_writer = BufWriter::new(outfile);
+
+  //open the csv file for reading
+  let infile = File::open(csv_path).expect("Couldn't open CSV input file for read.");
+
+  let mut csv_reader = csv::ReaderBuilder::new()
+    .delimiter(b' ')
+    .has_headers(false)
+    .from_reader(infile) ;
+
+  let mut chunk_count = 0;
+  let mut rising_evt_count = 0;
+  let mut falling_evt_count = 0;
+
+  let mut fbb:FlatBufferBuilder = FlatBufferBuilder::new();
+  let mut chunk_events:Vec<event_cam::ChangeEvent> = vec!();
+
+  let mut csv_record:csv::StringRecord = csv::StringRecord::new();
+  let mut record_count = 0;
+
+  while let Ok(record_is_valid) = csv_reader.read_record(&mut csv_record) {
+    if !record_is_valid {
+      //this occurs when there are no more records to read
+      break;
+    }
+
+    record_count += 1;
+    let timestamp = csv_record[0].parse::<f64>().unwrap();
+    let x_pos:u16 = csv_record[1].parse::<u16>().unwrap();
+    let y_pos:u16 = csv_record[2].parse::<u16>().unwrap();
+    let polarity:i8 = csv_record[3].parse::<i8>().unwrap();
+
+    //we currently only support rising and falling polarity
+    if polarity > 0 { rising_evt_count += 1; }
+    else { falling_evt_count +=1; }
+
+    chunk_events.push(
+      event_cam::ChangeEvent::new(
+        timestamp.into(),
+        x_pos.into(),
+        y_pos.into(),
+        polarity
+      )
+    );
+
+    if chunk_events.len() == 100 {
+      chunk_count += 1;
+      write_chunk_to_file(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
+      //reset counts etc
+      rising_evt_count = 0;
+      falling_evt_count = 0;
+      chunk_events.clear();
+    }
+
+  }
+
+  // ensure that we flush any queued events when input finishes
+  if chunk_events.len() > 0 {
+    chunk_count += 1;
+    write_chunk_to_file(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
+  }
+
+  (record_count, chunk_count)
+}
 
 /// write the events in the given chunk to a file, with the chunk length prefix
 fn write_chunk_to_file(fbb: &mut FlatBufferBuilder, outfile_writer:&mut BufWriter<File>, rising_evt_count: u32, falling_evt_count: u32, chunk_events:&[event_cam::ChangeEvent] ) {
@@ -18,75 +98,11 @@ fn write_chunk_to_file(fbb: &mut FlatBufferBuilder, outfile_writer:&mut BufWrite
   outfile_writer.write_u32::<LittleEndian>(chunk_size as u32).expect("write failed");
   outfile_writer.write_all(chunk_data).expect("write failed");
 
-  //reset counts etc
+  // clear the data sitting in the FlatBufferBuilder
   fbb.reset();
 }
 
-pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) {
-
-  //open the out fb file for writing
-  let outfile = File::create(flatbuf_path).expect("Couldn't open outfile");
-  let mut outfile_writer = BufWriter::new(outfile);
-
-  //open the csv file for reading
-  let infile = File::open(csv_path).expect("Couldn't open infile");
-  let infile_reader = BufReader::new(infile);
-
-  let mut csv_reader = csv::ReaderBuilder::new()
-    .delimiter(b' ')
-    .from_reader(infile_reader);
-
-  let mut rising_evt_count = 0;
-  let mut falling_evt_count = 0;
-
-  let mut fbb:FlatBufferBuilder = FlatBufferBuilder::new();
-  let mut chunk_events:Vec<event_cam::ChangeEvent> = vec!();
-  for result in csv_reader.records() {
-    if result.is_ok() {
-      let record = result.unwrap();
-      //events.txt: One event per line (timestamp x y polarity) eg ["0.706715000 58 68 1"]
-
-      let timestamp = record[0].parse::<f64>().unwrap();
-      let x_pos:u16 = record[1].parse::<u16>().unwrap();
-      let y_pos:u16 = record[2].parse::<u16>().unwrap();
-      let polarity:i8 = record[3].parse::<i8>().unwrap();
-
-      //we currently only support rising and falling polarity
-      if polarity > 0 { rising_evt_count += 1; }
-      else { falling_evt_count +=1; }
-
-      chunk_events.push(
-        event_cam::ChangeEvent::new(
-          timestamp.into(),
-          x_pos.into(),
-          y_pos.into(),
-          polarity
-        )
-      );
-
-      if chunk_events.len() == 100 {
-        write_chunk_to_file(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
-        //reset counts etc
-        rising_evt_count = 0;
-        falling_evt_count = 0;
-        chunk_events.clear();
-      }
-
-    }
-    else {
-      // ensure that we flush any queued events when input finishes, or get another read error
-      if chunk_events.len() > 0 {
-        println!("final chunk events: {}", chunk_events.len());
-        write_chunk_to_file(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
-      }
-      break;
-    }
-  }
-
-
-}
-
-pub fn flatten_framedata<'a>(fbb: &'a mut FlatBufferBuilder, rising_count: u32, falling_count: u32, events:&[event_cam::ChangeEvent])
+fn flatten_framedata<'a>(fbb: &'a mut FlatBufferBuilder, rising_count: u32, falling_count: u32, events:&[event_cam::ChangeEvent])
                              -> &'a[u8] {
 
 //  println!("rising: {} falling: {} total: {}", rising_count, falling_count, events.len());
@@ -102,13 +118,22 @@ pub fn flatten_framedata<'a>(fbb: &'a mut FlatBufferBuilder, rising_count: u32, 
 
   fbb.finish(root, None);
   fbb.finished_data()
-
 }
 
 
+fn convert_change_event_to_sae_event(fb_event: &ChangeEvent, timebase: f64, timescale: f64) -> SaeEvent {
+  SaeEvent {
+    row: fb_event.y() as u16,
+    col: fb_event.x() as u16,
+    polarity: fb_event.polarity() as u8,
+    timestamp: ((fb_event.time() - timebase) /timescale) as SaeTime,
+    norm_descriptor: None,
+  }
+}
 
-/// read the next set of events from the current length-prefixed chunk in the file
-pub fn read_next_chunk_sae_events(buf_reader: &mut BufReader<File>) -> Vec<SaeEvent> {
+/// Converts flatbuffer events from a Reader into SAE Events
+/// read the next set of flatbuffer events from the current length-prefixed chunk in the file
+pub fn read_next_chunk_sae_events(buf_reader: &mut BufReader<File>, timebase: f64, timescale: f64) -> Vec<SaeEvent> {
 
   let chunk_len = buf_reader.read_u32::<LittleEndian>().unwrap_or(0);
   //println!("chunk_len: {}", chunk_len);
@@ -122,19 +147,15 @@ pub fn read_next_chunk_sae_events(buf_reader: &mut BufReader<File>) -> Vec<SaeEv
     let total_evts = fb_events.len();
     let sum_evts_check: usize = (frame_data.rising_count() + frame_data.falling_count()) as usize;
     if total_evts != sum_evts_check {
+      //TODO return an error result or Option instead
       eprintln!("MISMATCH total_evts {} rising {} falling {} ",
                 total_evts, frame_data.rising_count(), frame_data.falling_count());
     }
 
-    let event_list:Vec<SaeEvent> = fb_events.iter().map(|fb_event| {
-      SaeEvent {
-        row: fb_event.y() as u16,
-        col: fb_event.x() as u16,
-        polarity: fb_event.polarity() as u8,
-        timestamp: fb_event.time() as u32,
-        norm_descriptor: None,
-      }
-    }).collect();
+    //TODO candidate for rayon par_iter ?
+    let event_list:Vec<SaeEvent> = fb_events.iter().map( |fb_event|
+      convert_change_event_to_sae_event(&fb_event, timebase, timescale)
+    ).collect();
 
     return event_list;
   }
@@ -144,10 +165,38 @@ pub fn read_next_chunk_sae_events(buf_reader: &mut BufReader<File>) -> Vec<SaeEv
 }
 
 
-//#[cfg(test)]
-//mod tests {
-//  #[test]
-//  fn it_works() {
-//    assert_eq!(2 + 2, 4);
-//  }
-//}
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use assert_approx_eq::assert_approx_eq;
+
+  /// Convert event file from CSV to flatbuffer, then read back flatbuffer
+  /// Caution: this test treats the `sample_25_events.txt` file as a gold file
+  #[test]
+  fn test_conversion_roundtrip() {
+
+    let csv_path = Path::new("./data/sample_25_events.txt");
+    let flatbuf_path = Path::new("./data/sample_25_events.dat");
+    let (record_count, _chunk_count) = csv_to_flatbuf(&csv_path, &flatbuf_path);
+    assert_eq!(record_count, 25);
+
+    let infile = File::open(flatbuf_path).expect("Couldn't open flatbuf_path");
+    let mut infile_reader = BufReader::new(infile);
+    let timescale = 1E-6; //each tick of SaeTime is one microsecond ?
+    let timebase = 0.003811000;//from gold file
+    let event_list = read_next_chunk_sae_events(&mut infile_reader, timebase, timescale);
+    assert_eq!(event_list.len(), 25);
+
+    let event_slice = event_list.as_slice();
+    let first_event = &event_slice[0];
+    assert_eq!(0, first_event.timestamp);
+
+    let second_event_time = 0.003820001;
+    let expected_time = ((second_event_time - timebase) / timescale) as SaeTime;
+    let second_event = &event_slice[1];
+    assert_eq!(expected_time, second_event.timestamp);
+  }
+
+
+
+}
