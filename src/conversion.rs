@@ -35,12 +35,14 @@ pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) -> (u32, u32) {
     .has_headers(false)
     .from_reader(infile) ;
 
+  //the only hard limit is the size of a flatbuffer, which can't exceed 2 GB
+  const CHUNK_EVENT_CAPACITY:usize = 1000;
   let mut chunk_count = 0;
   let mut rising_evt_count = 0;
   let mut falling_evt_count = 0;
 
   let mut fbb:FlatBufferBuilder = FlatBufferBuilder::new();
-  let mut chunk_events:Vec<event_cam::ChangeEvent> = vec!();
+  let mut chunk_events:Vec<event_cam::ChangeEvent> = Vec::with_capacity(CHUNK_EVENT_CAPACITY);
 
   let mut csv_record:csv::StringRecord = csv::StringRecord::new();
   let mut record_count = 0;
@@ -70,7 +72,7 @@ pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) -> (u32, u32) {
       )
     );
 
-    if chunk_events.len() == 100 {
+    if chunk_events.len() == CHUNK_EVENT_CAPACITY {
       chunk_count += 1;
       write_chunk_to_file(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
       //reset counts etc
