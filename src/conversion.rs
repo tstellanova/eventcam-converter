@@ -1,6 +1,6 @@
 
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write, Read};
 use std::path::Path;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -8,6 +8,7 @@ use flatbuffers::{FlatBufferBuilder};
 
 use crate::dvs_event_generated::event_cam;
 
+use arcstar::sae_types::SaeEvent;
 
 /// write the events in the given chunk to a file, with the chunk length prefix
 fn write_chunk_to_file(fbb: &mut FlatBufferBuilder, outfile_writer:&mut BufWriter<File>, rising_evt_count: u32, falling_evt_count: u32, chunk_events:&[event_cam::ChangeEvent] ) {
@@ -105,31 +106,42 @@ pub fn flatten_framedata<'a>(fbb: &'a mut FlatBufferBuilder, rising_count: u32, 
 }
 
 
-//pub fn read_next_events(buf_reader: &mut BufReader<File>) -> &[ChangeEvent] {
-//
-//    let chunk_len = buf_reader.read_u32::<LittleEndian>().unwrap_or(0);
-//    //println!("chunk_len: {}", chunk_len);
-//
-//    if chunk_len > 0 {
-//      //flame::start("chunk_loader");
-//      let mut buf: Vec<u8> = vec![0; chunk_len as usize];
-//      buf_reader.read_exact(&mut buf).expect("couldn't read_exact");
-//      let frame_data: event_cam::FrameData = flatbuffers::get_root::<event_cam::FrameData>(&buf);
-//      let fb_events = frame_data.events().expect("no events");
-//      //flame::end("chunk_loader");
-//
-//      let total_evts = fb_events.len();
-//      let sum_evts_check: usize = (frame_data.rising_count() + frame_data.falling_count()) as usize;
-//      if total_evts != sum_evts_check {
-//        eprintln!("MISMATCH total_evts {} rising {} falling {} ",
-//                  total_evts, frame_data.rising_count(), frame_data.falling_count());
-//      }
-//
-//      return fb_events;
-//    }
-//
-//
-//}
+
+/// read the next set of events from the current length-prefixed chunk in the file
+pub fn read_next_chunk_sae_events(buf_reader: &mut BufReader<File>) -> Vec<SaeEvent> {
+
+  let chunk_len = buf_reader.read_u32::<LittleEndian>().unwrap_or(0);
+  //println!("chunk_len: {}", chunk_len);
+
+  if chunk_len > 0 {
+    let mut buf: Vec<u8> = vec![0; chunk_len as usize];
+    buf_reader.read_exact(&mut buf).expect("couldn't read_exact");
+    let frame_data: event_cam::FrameData = flatbuffers::get_root::<event_cam::FrameData>(&buf);
+    let fb_events = frame_data.events().expect("no events");
+
+    let total_evts = fb_events.len();
+    let sum_evts_check: usize = (frame_data.rising_count() + frame_data.falling_count()) as usize;
+    if total_evts != sum_evts_check {
+      eprintln!("MISMATCH total_evts {} rising {} falling {} ",
+                total_evts, frame_data.rising_count(), frame_data.falling_count());
+    }
+
+    let event_list:Vec<SaeEvent> = fb_events.iter().map(|fb_event| {
+      SaeEvent {
+        row: fb_event.y() as u16,
+        col: fb_event.x() as u16,
+        polarity: fb_event.polarity() as u8,
+        timestamp: fb_event.time() as u32,
+        norm_descriptor: None,
+      }
+    }).collect();
+
+    return event_list;
+  }
+
+  //otherwise return empty vector (no events)
+  vec!()
+}
 
 
 //#[cfg(test)]
