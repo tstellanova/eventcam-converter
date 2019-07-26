@@ -74,7 +74,7 @@ pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) -> (u32, u32) {
 
     if chunk_events.len() == CHUNK_EVENT_CAPACITY {
       chunk_count += 1;
-      write_chunk_to_file(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
+      write_chunk(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
       //reset counts etc
       rising_evt_count = 0;
       falling_evt_count = 0;
@@ -86,19 +86,20 @@ pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) -> (u32, u32) {
   // ensure that we flush any queued events when input finishes
   if chunk_events.len() > 0 {
     chunk_count += 1;
-    write_chunk_to_file(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
+    write_chunk(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
   }
 
   (record_count, chunk_count)
 }
 
-/// write the events in the given chunk to a file, with the chunk length prefix
-fn write_chunk_to_file(fbb: &mut FlatBufferBuilder, outfile_writer:&mut BufWriter<File>, rising_evt_count: u32, falling_evt_count: u32, chunk_events:&[event_cam::ChangeEvent] ) {
+
+/// write the events in the given chunk to a stream, with the chunk length prefix
+fn write_chunk<W: Write>(fbb: &mut FlatBufferBuilder, writer:&mut BufWriter<W>, rising_evt_count: u32, falling_evt_count: u32, chunk_events:&[event_cam::ChangeEvent] ) {
   let chunk_data = flatten_framedata(fbb, rising_evt_count, falling_evt_count, chunk_events);
   let chunk_size = chunk_data.len();
   //println!("chunk_size: {}", chunk_size);
-  outfile_writer.write_u32::<LittleEndian>(chunk_size as u32).expect("write failed");
-  outfile_writer.write_all(chunk_data).expect("write failed");
+  writer.write_u32::<LittleEndian>(chunk_size as u32).expect("write failed");
+  writer.write_all(chunk_data).expect("write failed");
 
   // clear the data sitting in the FlatBufferBuilder
   fbb.reset();
@@ -134,15 +135,19 @@ fn convert_change_event_to_sae_event(fb_event: &ChangeEvent, timebase: f64, time
 }
 
 /// Converts flatbuffer events from a Reader into SAE Events
-/// read the next set of flatbuffer events from the current length-prefixed chunk in the file
-pub fn read_next_chunk_sae_events(buf_reader: &mut BufReader<File>, timebase: f64, timescale: f64) -> Vec<SaeEvent> {
+/// read the next set of flatbuffer events from the current length-prefixed chunk in the stream
+pub fn read_next_chunk_sae_events<R: Read>(buf_reader: &mut BufReader<R>, timebase: f64, timescale: f64) -> Option<Vec<SaeEvent>> {
 
   let chunk_len = buf_reader.read_u32::<LittleEndian>().unwrap_or(0);
   //println!("chunk_len: {}", chunk_len);
 
   if chunk_len > 0 {
     let mut buf: Vec<u8> = vec![0; chunk_len as usize];
-    buf_reader.read_exact(&mut buf).expect("couldn't read_exact");
+    let read_res = buf_reader.read_exact(&mut buf);
+    if read_res.is_err() {
+      eprintln!("Events read error: {:?}", read_res);
+      return None;
+    }
     let frame_data: event_cam::FrameData = flatbuffers::get_root::<event_cam::FrameData>(&buf);
     let fb_events = frame_data.events().expect("no events");
 
@@ -159,18 +164,18 @@ pub fn read_next_chunk_sae_events(buf_reader: &mut BufReader<File>, timebase: f6
       convert_change_event_to_sae_event(&fb_event, timebase, timescale)
     ).collect();
 
-    return event_list;
+    return Some(event_list);
   }
 
   //otherwise return empty vector (no events)
-  vec!()
+  None
 }
 
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use assert_approx_eq::assert_approx_eq;
+//  use assert_approx_eq::assert_approx_eq;
 
   /// Convert event file from CSV to flatbuffer, then read back flatbuffer
   /// Caution: this test treats the `sample_25_events.txt` file as a gold file
@@ -186,7 +191,9 @@ mod tests {
     let mut infile_reader = BufReader::new(infile);
     let timescale = 1E-6; //each tick of SaeTime is one microsecond ?
     let timebase = 0.003811000;//from gold file
-    let event_list = read_next_chunk_sae_events(&mut infile_reader, timebase, timescale);
+    let event_list_opt = read_next_chunk_sae_events(&mut infile_reader, timebase, timescale);
+    assert_eq!(true, event_list_opt.is_some());
+    let event_list = event_list_opt.unwrap();
     assert_eq!(event_list.len(), 25);
 
     let event_slice = event_list.as_slice();
@@ -197,6 +204,12 @@ mod tests {
     let expected_time = ((second_event_time - timebase) / timescale) as SaeTime;
     let second_event = &event_slice[1];
     assert_eq!(expected_time, second_event.timestamp);
+
+
+    //attempt to read more events from the reader-- should fail at EOF
+    let event_list_opt2 = read_next_chunk_sae_events(&mut infile_reader, timebase, timescale);
+    assert_eq!(true, event_list_opt2.is_none());
+
   }
 
 
