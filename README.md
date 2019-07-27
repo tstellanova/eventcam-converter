@@ -1,12 +1,12 @@
 # eventcam-converter
 
 This project provides tools for consuming event camera data files provided by the 
-(Event-Camera Dataset and Simulator)[http://rpg.ifi.uzh.ch/davis_data.html]
+[Event-Camera Dataset and Simulator](http://rpg.ifi.uzh.ch/davis_data.html)
 into a fast binary format (flatbuffer) that can be processed without ROS. 
 
 
 ## Source Data Format
-The data provided by the (Event Camera Simulator)[http://rpg.ifi.uzh.ch/davis_data.html]
+The data provided by the [Event Camera Simulator](http://rpg.ifi.uzh.ch/davis_data.html)
 and related tools is generally in this format:
 
 - `events.txt`: One timestamped pixel change event per line (timestamp x y polarity). The timestamp is in a 64-bit double float format used by ROS. X and Y are unsigned integer pixel coordinates. Polarity is typically 0 (falling) or 1 (rising).
