@@ -4,7 +4,6 @@ use eventcam_converter::conversion;
 
 #[macro_use]
 extern crate clap;
-use clap::{Arg, App, SubCommand};
 
 /// Simple example of converting the CSV event format into a flatbuffer
 fn main() {
