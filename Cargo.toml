@@ -9,6 +9,8 @@ edition = "2018"
 flatbuffers = "0.6.0"
 byteorder = "1.3.2"
 csv = "1.1.1"
+clap = "2.33.0"
+
 
 
 [dependencies.arcstar]
