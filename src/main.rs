@@ -16,16 +16,14 @@ fn main() {
         (@arg OUTPUT: -o --output +takes_value  "Sets the output file to use")
     ).get_matches();
 
-
-  let infile = matches.value_of("input").unwrap_or("./data/events.txt");
-  let outfile = matches.value_of("output").unwrap_or("./data/events.dat");
+  let infile = matches.value_of("INPUT").unwrap_or("./data/events.txt");
+  let outfile = matches.value_of("OUTPUT").unwrap_or("./data/events.dat");
   println!("Translate from {} to {}", infile, outfile);
 
   let in_path = Path::new(infile);
   let out_path = Path::new(outfile);
   let (record_count, chunk_count) = conversion::csv_to_flatbuf(&in_path, &out_path);
 
-  println!("processed {} records , in {} chunks",record_count, chunk_count);
+  println!("Processed {} records , in {} chunks",record_count, chunk_count);
 
-  println!("Done!");
 }
