@@ -1,5 +1,5 @@
 [package]
-name = "eventcam_converter"
+name = "eventcam-converter"
 version = "0.1.0"
 authors = ["tstellanova <tstellanova@users.noreply.github.com>"]
 edition = "2018"
@@ -12,12 +12,9 @@ csv = "1.1.1"
 clap = "2.33.0"
 
 
-
 [dependencies.arcstar]
 git = "https://github.com/tstellanova/arcstar"
 #path = "../arcstar"
-
-
 
 
 [dev-dependencies]

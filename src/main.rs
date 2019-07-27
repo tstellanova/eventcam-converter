@@ -8,7 +8,7 @@ extern crate clap;
 /// Simple example of converting the CSV event format into a flatbuffer
 fn main() {
 
-  let matches = clap_app!(eventcam_converter =>
+  let matches = clap_app!(eventcam-converter =>
         (version: "0.1.0")
         (author: "Todd Stellanova")
         (about: "Converts text event files into flatbuffer binary format")
