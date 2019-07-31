@@ -21,7 +21,10 @@ use crate::dvs_event_generated::event_cam::ChangeEvent;
 ///
 /// Returns the tuple `(record_count, chunk_count)` where chunk count is the number of length-prefixed
 /// chunk buffers in the file
-pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) -> (u32, u32) {
+///
+/// chunk_size is the max number of events per chunk: the only hard limit is the
+/// size of a flatbuffer, which can't exceed 2 GB
+pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path, chunk_size: usize) -> (u32, u32) {
 
   //open the out fb file for writing
   let outfile = File::create(flatbuf_path).expect("Couldn't open flatbuf output file for write.");
@@ -35,14 +38,12 @@ pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) -> (u32, u32) {
     .has_headers(false)
     .from_reader(infile) ;
 
-  //the only hard limit is the size of a flatbuffer, which can't exceed 2 GB
-  const CHUNK_EVENT_CAPACITY:usize = 1000;
   let mut chunk_count = 0;
   let mut rising_evt_count = 0;
   let mut falling_evt_count = 0;
 
   let mut fbb:FlatBufferBuilder = FlatBufferBuilder::new();
-  let mut chunk_events:Vec<event_cam::ChangeEvent> = Vec::with_capacity(CHUNK_EVENT_CAPACITY);
+  let mut chunk_events:Vec<event_cam::ChangeEvent> = Vec::with_capacity(chunk_size);
 
   let mut csv_record:csv::StringRecord = csv::StringRecord::new();
   let mut record_count = 0;
@@ -72,7 +73,7 @@ pub fn csv_to_flatbuf(csv_path: &Path, flatbuf_path: &Path) -> (u32, u32) {
       )
     );
 
-    if chunk_events.len() == CHUNK_EVENT_CAPACITY {
+    if chunk_events.len() == chunk_size {
       chunk_count += 1;
       write_chunk(&mut fbb, &mut outfile_writer, rising_evt_count, falling_evt_count, chunk_events.as_slice());
       //reset counts etc
@@ -184,13 +185,13 @@ mod tests {
 
     let csv_path = Path::new("./data/sample_25_events.txt");
     let flatbuf_path = Path::new("./data/sample_25_events.dat");
-    let (record_count, _chunk_count) = csv_to_flatbuf(&csv_path, &flatbuf_path);
+    let (record_count, _chunk_count) = csv_to_flatbuf(&csv_path, &flatbuf_path, 1000);
     assert_eq!(record_count, 25);
 
     let infile = File::open(flatbuf_path).expect("Couldn't open flatbuf_path");
     let mut infile_reader = BufReader::new(infile);
     let timescale = 1E-6; //each tick of SaeTime is one microsecond ?
-    let timebase = 0.003811000;//from gold file
+    let timebase = 0.0; //0.003811000 from gold file
     let event_list_opt = read_next_chunk_sae_events(&mut infile_reader, timebase, timescale);
     assert_eq!(true, event_list_opt.is_some());
     let event_list = event_list_opt.unwrap();
@@ -198,7 +199,7 @@ mod tests {
 
     let event_slice = event_list.as_slice();
     let first_event = &event_slice[0];
-    assert_eq!(0, first_event.timestamp);
+    assert_eq!(first_event.timestamp, 3811);//value from gold file at given timescale
 
     let second_event_time = 0.003820001;
     let expected_time = ((second_event_time - timebase) / timescale) as SaeTime;
